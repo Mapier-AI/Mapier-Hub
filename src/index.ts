@@ -13,6 +13,7 @@ import { testRedisConnection, closeRedisConnection } from './config/redis.js'
 import searchRoutes from './routes/search.js'
 import placesRoutes from './routes/places.js'
 import nlpRoutes from './routes/nlp.js'
+import debugRoutes from './routes/debug.js'
 
 // Import services
 import { cacheService } from './services/cache.service.js'
@@ -62,6 +63,7 @@ app.get('/api/v1/stats', async (c) => {
 app.route('/api/v1/search', searchRoutes)
 app.route('/api/v1/places', placesRoutes)
 app.route('/api/v1/nl', nlpRoutes)
+app.route('/api/v1/debug', debugRoutes)
 
 // 404 handler
 app.notFound((c) => {

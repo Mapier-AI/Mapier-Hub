@@ -1,8 +1,8 @@
+// MUST load .env FIRST before any other imports
 import { config } from 'dotenv'
-import { z } from 'zod'
+config({ override: true }) // Override shell env vars
 
-// Load environment variables
-config()
+import { z } from 'zod'
 
 // Environment variable schema
 const envSchema = z.object({
