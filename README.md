@@ -1,21 +1,16 @@
 # Mapier Hub API
 
-Multi-provider map data aggregation backend built with Hono, TypeScript, and Supabase.
+Multi-provider map data aggregation backend with AI-powered natural language search. Built with Hono, TypeScript, Supabase, and OpenRouter.
 
 ## Features
 
-- ✅ Geospatial search using PostGIS
-- ✅ Full-text search on place names
-- ✅ Redis caching for performance
-- ✅ Provider abstraction layer (ready for Google Places, OSM, etc.)
-- ✅ Type-safe with TypeScript and Zod validation
-- ✅ Fast and lightweight (Hono framework)
-
-## Prerequisites
-
-- Node.js 20+
-- Supabase project
-- Redis instance (Upstash recommended)
+- ✅ **Multi-provider search** - Local DB, Google Places, Refuge Restrooms
+- ✅ **AI-powered queries** - Natural language search with tool calling (Grok-4.1-fast)
+- ✅ **Geospatial search** - PostGIS-powered location search with radius filtering
+- ✅ **Google Places integration** - Autocomplete and place details
+- ✅ **Smart caching** - Redis-backed caching for optimal performance
+- ✅ **Result deduplication** - Automatic merging of results from multiple providers
+- ✅ **Type-safe** - Full TypeScript with Zod validation
 
 ## Quick Start
 
@@ -27,26 +22,24 @@ yarn install
 
 ### 2. Environment Setup
 
-Copy `.env.example` to `.env` and fill in your credentials:
-
-```bash
-cp .env.example .env
-```
-
-Required environment variables:
+Create a `.env` file with the following variables:
 
 ```env
-# Supabase (from your Supabase project settings)
+# Supabase Configuration
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
-# Redis (from Upstash or your Redis provider)
+# Redis Configuration (Upstash)
 REDIS_URL=rediss://default:password@endpoint.upstash.io:6379
 
-# Server
-PORT=3000
+# Server Configuration
+PORT=3001
 NODE_ENV=development
+
+# API Keys for External Providers
+GOOGLE_PLACES_API_KEY=your-google-api-key
+OPENROUTER_API_KEY=your-openrouter-api-key  # Optional, for AI features
 ```
 
 ### 3. Run Development Server
@@ -55,256 +48,191 @@ NODE_ENV=development
 yarn dev
 ```
 
-Server will start on `http://localhost:3000`
+Server will start on `http://localhost:3001`
 
 ## API Endpoints
 
-### Search Places
+### Core Search
 
-**Endpoint:** `POST /api/v1/search`
-
-**Request Body:**
+**POST /api/v1/search** - Multi-provider POI search
 
 ```json
 {
-  "location": {
-    "lat": 40.7580,
-    "lon": -73.9855,
-    "radius": 1000
-  },
+  "location": { "lat": 41.7937, "lon": -87.5937, "radius": 2000 },
   "query": "coffee",
-  "category": "cafe",
-  "limit": 20,
-  "offset": 0
-}
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "results": [
-    {
-      "id": "place_123",
-      "name": "Blue Bottle Coffee",
-      "location": {
-        "lat": 40.7580,
-        "lon": -73.9855
-      },
-      "category": {
-        "primary": "cafe",
-        "secondary": []
-      },
-      "confidence": 0.95,
-      "socials": [],
-      "websites": ["https://bluebottlecoffee.com"],
-      "attributes": {},
-      "distance": 150.5
-    }
-  ],
-  "metadata": {
-    "provider": "local",
-    "count": 15,
-    "cached": false,
-    "latency_ms": 45,
-    "confidence": 1.0
-  }
-}
-```
-
-### Get Place Details
-
-**Endpoint:** `GET /api/v1/places/:id`
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "place": {
-    "id": "place_123",
-    "name": "Blue Bottle Coffee",
-    "location": {
-      "lat": 40.7580,
-      "lon": -73.9855
-    },
-    "category": {
-      "primary": "cafe"
-    },
-    "confidence": 0.95,
-    "socials": [],
-    "websites": ["https://bluebottlecoffee.com"],
-    "attributes": {}
-  }
-}
-```
-
-### Health Check
-
-**Endpoint:** `GET /api/v1/search/health`
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "status": "healthy",
-  "providers": {
-    "local": true
-  }
-}
-```
-
-### Cache Statistics
-
-**Endpoint:** `GET /api/v1/stats`
-
-**Response:**
-
-```json
-{
-  "cache": {
-    "keys": 142,
-    "memory": "1.2M"
-  },
-  "uptime": 3600.5,
-  "memory": {
-    "rss": 50331648,
-    "heapTotal": 20971520,
-    "heapUsed": 15728640
-  }
-}
-```
-
-## Supported Query Types
-
-### 1. Geospatial Search (Required)
-
-Find places within a radius:
-
-```json
-{
-  "location": {
-    "lat": 40.7580,
-    "lon": -73.9855,
-    "radius": 2000
-  }
-}
-```
-
-### 2. Category Filtering
-
-Filter by place category:
-
-```json
-{
-  "location": { "lat": 40.7580, "lon": -73.9855 },
-  "category": "restaurant"
-}
-```
-
-### 3. Text Search
-
-Search by place name:
-
-```json
-{
-  "location": { "lat": 40.7580, "lon": -73.9855 },
-  "query": "starbucks"
-}
-```
-
-### 4. Combined Queries
-
-Combine all filters:
-
-```json
-{
-  "location": { "lat": 40.7580, "lon": -73.9855, "radius": 1000 },
-  "category": "cafe",
-  "query": "coffee",
+  "providers": ["local", "google"],
   "limit": 20
 }
 ```
 
-## Database Schema
+### AI-Powered Search
 
-The API uses the following Supabase tables:
+**POST /api/v1/ai/query** - Natural language queries with tool calling
 
-### `places`
+```json
+{
+  "message": "Find me the nearest restroom",
+  "location": { "lat": 41.7937, "lon": -87.5937 }
+}
+```
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | text | Primary key |
-| name | text | Place name |
-| lat | float | Latitude |
-| lon | float | Longitude |
-| geom | geometry | PostGIS point (auto-generated) |
-| primary_category | text | Main category |
-| confidence | float | Data quality score (0-1) |
-| socials | text[] | Social media URLs |
-| websites | text[] | Website URLs |
-| raw | jsonb | Raw provider data |
-| search_vector | tsvector | Full-text search (auto-generated) |
+Response includes tool execution results:
 
-### Postgres Functions
+```json
+{
+  "success": true,
+  "response": "",
+  "tool_results": [{
+    "toolName": "search_restrooms",
+    "output": {
+      "count": 10,
+      "restrooms": [...]
+    }
+  }],
+  "finish_reason": "tool-calls"
+}
+```
 
-- `search_places_nearby()` - Efficient geospatial search
-- `get_place_by_id()` - Fetch place details
+### Google Places
+
+**GET /api/v1/places/autocomplete?input=starbucks&lat=41.7937&lon=-87.5937**
+
+Returns Google Places autocomplete suggestions.
+
+**GET /api/v1/places/:id** - Get place details
+
+**POST /api/v1/places/resolve** - Resolve and enrich POI data
+
+```json
+{
+  "google_place_id": "ChIJ...",
+  "lat": 41.7937,
+  "lon": -87.5937,
+  "name": "Starbucks",
+  "category": "cafe"
+}
+```
+
+### Health & Stats
+
+**GET /api/v1/search/health** - Provider health check
+
+**GET /api/v1/stats** - Cache statistics and server metrics
 
 ## Project Structure
 
 ```
 src/
-├── config/           # Configuration (env, supabase, redis)
-├── providers/        # Provider abstraction layer
-│   ├── types.ts      # Type definitions
-│   ├── base.ts       # Base provider class
-│   └── local.provider.ts  # Local DB provider
-├── services/         # Business logic
-│   ├── orchestrator.ts    # Query coordinator
-│   └── cache.service.ts   # Redis caching
-├── routes/           # API endpoints
-│   ├── search.ts     # Search endpoints
-│   └── places.ts     # Place endpoints
-├── middleware/       # Request processing
-│   └── validator.ts  # Zod validation
-└── index.ts          # App entry point
+├── config/              # Configuration
+│   ├── env.ts           # Environment variables with Zod validation
+│   ├── supabase.ts      # Supabase client setup
+│   └── redis.ts         # Redis client setup
+│
+├── providers/           # Provider abstraction layer
+│   ├── types.ts         # Provider interface definitions
+│   ├── base.ts          # Base provider class with metrics
+│   ├── local.provider.ts      # Local Supabase/PostGIS provider
+│   ├── google.provider.ts     # Google Places API provider
+│   └── refuge.provider.ts     # Refuge Restrooms API provider
+│
+├── services/            # Business logic
+│   ├── orchestrator.ts  # Multi-provider query coordination & deduplication
+│   ├── cache.service.ts # Redis caching layer
+│   ├── ai.service.ts    # OpenRouter AI integration
+│   └── tools.ts         # AI tool definitions (restroom search, etc.)
+│
+├── routes/              # API endpoints
+│   ├── search.ts        # Main search endpoint
+│   ├── places.ts        # Google Places endpoints
+│   ├── ai.ts            # AI query endpoint
+│   └── debug.ts         # Debug endpoints for testing providers
+│
+└── index.ts             # App entry point & server setup
 ```
+
+## Architecture
+
+### Provider System
+
+The provider abstraction layer allows seamless integration of multiple data sources:
+
+- **Local Provider** - PostGIS-powered geospatial search in Supabase
+- **Google Places Provider** - Real-time Google Places API integration
+- **Refuge Restrooms Provider** - Accessible/gender-neutral restroom data
+
+Each provider implements a common interface (`SearchProvider`) with:
+- `search()` - Query execution
+- `getPlace()` - Fetch place details
+- `autocomplete()` - Autocomplete suggestions (if supported)
+
+### Query Orchestrator
+
+The orchestrator coordinates queries across multiple providers:
+
+1. **Parallel execution** - Queries all requested providers simultaneously
+2. **Result deduplication** - Merges results using spatial proximity (configurable threshold)
+3. **Confidence scoring** - Ranks results based on provider reliability and data quality
+4. **Caching** - Automatic cache-aside pattern with Redis
+
+### AI Tool Calling
+
+The AI service uses OpenRouter (Grok-4.1-fast:free) with the Vercel AI SDK:
+
+- **Tool definitions** - Modular tools in `services/tools.ts`
+- **Multi-step execution** - Supports up to 5 tool calls per query
+- **Context injection** - User location passed via system message
+- **Result extraction** - Tool results returned in `tool_results` array
+
+Current tools:
+- `search_restrooms` - Find accessible/gender-neutral restrooms
+
+## Database Schema
+
+### places
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | text | Primary key |
+| name | text | Place name |
+| lat | float8 | Latitude |
+| lon | float8 | Longitude |
+| geom | geometry(Point,4326) | PostGIS point |
+| google_place_id | text | Google Place ID (unique) |
+| primary_category | text | Main category |
+| confidence | float8 | Quality score (0-1) |
+| socials | text[] | Social media URLs |
+| websites | text[] | Website URLs |
+| providers | jsonb | Provider metadata |
+| raw | jsonb | Raw provider data |
+| search_vector | tsvector | Full-text search |
+
+**Indexes:**
+- `idx_places_geom` - Spatial index (GIST)
+- `idx_places_google_place_id` - Google Place ID lookup
+- `idx_places_search_vector` - Full-text search (GIN)
 
 ## Caching Strategy
 
 ### Search Results
-- **TTL:** 5 minutes (300 seconds)
-- **Key format:** `search:{params_hash}`
+- **TTL:** 5 minutes
+- **Key:** `search:{hash(params)}`
 
 ### Place Details
-- **TTL:** 30 minutes (1800 seconds)
-- **Key format:** `place:{id}`
+- **TTL:** 30 minutes
+- **Key:** `place:{id}` or `place:autocomplete:{hash}`
 
-### Cache Hit Rate
-Expected: 40-60% based on typical usage patterns
+### Performance Targets
 
-## Performance
-
-### Expected Latencies (p95)
-
-- **Local only:** 50-100ms
-- **With cache hit:** 5-10ms
-- **With cache miss:** 100-200ms
-
-### Throughput
-
-- **Single instance:** 500-1000 req/s
-- **With Redis:** 2000+ req/s
+- Cache hit: < 10ms
+- Cache miss (local only): 50-100ms
+- Multi-provider query: 200-400ms
 
 ## Development
 
-### Run Tests
+### Run in Development
 
 ```bash
-yarn test
+yarn dev  # Starts with hot reload
 ```
 
 ### Type Check
@@ -320,15 +248,37 @@ yarn build
 yarn start
 ```
 
-## Next Steps (Phase 2)
+## Testing Providers
 
-- [ ] Add Google Places provider
-- [ ] Add OpenStreetMap provider
-- [ ] Implement result merging and deduplication
-- [ ] Add natural language query parsing
-- [ ] Implement streaming API (SSE)
-- [ ] Add GraphQL endpoint
+Use debug endpoints to test individual providers:
 
-## License
+```bash
+# Test local provider
+curl -X POST http://localhost:3001/api/v1/debug/local \
+  -H "Content-Type: application/json" \
+  -d '{"location": {"lat": 41.7937, "lon": -87.5937}, "query": "coffee"}'
 
-MIT
+# Test Google provider
+curl -X POST http://localhost:3001/api/v1/debug/google \
+  -H "Content-Type: application/json" \
+  -d '{"location": {"lat": 41.7937, "lon": -87.5937}, "query": "starbucks"}'
+
+# Test Refuge Restrooms provider
+curl -X POST http://localhost:3001/api/v1/debug/refuge \
+  -H "Content-Type: application/json" \
+  -d '{"location": {"lat": 41.7937, "lon": -87.5937}}'
+```
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SUPABASE_URL` | Yes | Supabase project URL |
+| `SUPABASE_ANON_KEY` | Yes | Supabase anonymous key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase service role key |
+| `REDIS_URL` | Yes | Redis connection URL (Upstash format) |
+| `PORT` | No | Server port (default: 3001) |
+| `NODE_ENV` | No | Environment (development/production) |
+| `GOOGLE_PLACES_API_KEY` | No | Google Places API key (enables Google provider) |
+| `OPENROUTER_API_KEY` | No | OpenRouter API key (enables AI features) |
+
