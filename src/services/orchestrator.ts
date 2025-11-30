@@ -428,6 +428,42 @@ export class QueryOrchestrator {
 
     return await googleProvider.autocomplete(input, location)
   }
+
+  /**
+   * Resolve a POI (find or create canonical record + enrich with Mapier data)
+   * TODO: Implement full resolution logic:
+   * - Check if POI exists by google_place_id
+   * - Check by coordinates (fuzzy match within 50m)
+   * - Create new POI if not found
+   * - Enrich with tags, user lists, friends, AI blurb
+   */
+  async resolvePOI(data: {
+    google_place_id?: string
+    lat?: number
+    lon?: number
+    name?: string
+    category?: string
+  }): Promise<any> {
+    // Placeholder implementation
+    return {
+      poi_id: `mapier_${Date.now()}`,
+      google_place_id: data.google_place_id,
+      name: data.name || 'Unknown Place',
+      location: {
+        lat: data.lat || 0,
+        lon: data.lon || 0,
+      },
+      category: {
+        primary: data.category || 'unknown',
+      },
+      mapier_metadata: {
+        enriched: true,
+        tags: [],
+        user_lists: [],
+        friends_visited: [],
+      },
+    }
+  }
 }
 
 // Singleton instance

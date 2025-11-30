@@ -12,8 +12,8 @@ import { testRedisConnection, closeRedisConnection } from './config/redis.js'
 // Import routes
 import searchRoutes from './routes/search.js'
 import placesRoutes from './routes/places.js'
-import nlpRoutes from './routes/nlp.js'
 import debugRoutes from './routes/debug.js'
+import aiRoutes from './routes/ai.js'
 
 // Import services
 import { cacheService } from './services/cache.service.js'
@@ -34,15 +34,17 @@ app.get('/', (c) => {
     status: 'operational',
     endpoints: {
       search: 'POST /api/v1/search',
-      nlSearch: 'POST /api/v1/nl/search',
-      autocomplete: 'GET /api/v1/nl/autocomplete?input=query',
+      aiQuery: 'POST /api/v1/ai/query',
+      autocomplete: 'GET /api/v1/places/autocomplete?input=query',
       place: 'GET /api/v1/places/:id',
+      poiResolve: 'POST /api/v1/places/resolve',
       health: 'GET /api/v1/search/health',
       stats: 'GET /api/v1/stats',
     },
     features: {
       providers: ['local', 'google', 'refuge'],
-      nlp: !!process.env.OPENAI_API_KEY,
+      ai: !!process.env.OPENROUTER_API_KEY,
+      aiModel: 'grok-4.1-fast:free',
       semanticSearch: true,
       deduplication: true,
     },
@@ -62,7 +64,7 @@ app.get('/api/v1/stats', async (c) => {
 // Mount routes
 app.route('/api/v1/search', searchRoutes)
 app.route('/api/v1/places', placesRoutes)
-app.route('/api/v1/nl', nlpRoutes)
+app.route('/api/v1/ai', aiRoutes)
 app.route('/api/v1/debug', debugRoutes)
 
 // 404 handler

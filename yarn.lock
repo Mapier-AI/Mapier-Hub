@@ -2,6 +2,39 @@
 # yarn lockfile v1
 
 
+"@ai-sdk/gateway@2.0.17":
+  version "2.0.17"
+  resolved "https://registry.yarnpkg.com/@ai-sdk/gateway/-/gateway-2.0.17.tgz#b89819798c685f7c59c589b3e31ce13b1473aa5f"
+  integrity sha512-oVAG6q72KsjKlrYdLhWjRO7rcqAR8CjokAbYuyVZoCO4Uh2PH/VzZoxZav71w2ipwlXhHCNaInGYWNs889MMDA==
+  dependencies:
+    "@ai-sdk/provider" "2.0.0"
+    "@ai-sdk/provider-utils" "3.0.18"
+    "@vercel/oidc" "3.0.5"
+
+"@ai-sdk/openai@^2.0.74":
+  version "2.0.74"
+  resolved "https://registry.yarnpkg.com/@ai-sdk/openai/-/openai-2.0.74.tgz#b9710412dfb721683669701fba6703fe53aace83"
+  integrity sha512-vvsL7rGoBEyQIePs630p31ebLeF+xxwLOrRKeIArHko8w7Wh9Kj3wL4Ns+PCzrEpAij31OKKDcxLQ1dSIg/qMw==
+  dependencies:
+    "@ai-sdk/provider" "2.0.0"
+    "@ai-sdk/provider-utils" "3.0.18"
+
+"@ai-sdk/provider-utils@3.0.18":
+  version "3.0.18"
+  resolved "https://registry.yarnpkg.com/@ai-sdk/provider-utils/-/provider-utils-3.0.18.tgz#fc7757ad7eb48a48ce1976da3025f0b9215b1aff"
+  integrity sha512-ypv1xXMsgGcNKUP+hglKqtdDuMg68nWHucPPAhIENrbFAI+xCHiqPVN8Zllxyv1TNZwGWUghPxJXU+Mqps0YRQ==
+  dependencies:
+    "@ai-sdk/provider" "2.0.0"
+    "@standard-schema/spec" "^1.0.0"
+    eventsource-parser "^3.0.6"
+
+"@ai-sdk/provider@2.0.0":
+  version "2.0.0"
+  resolved "https://registry.yarnpkg.com/@ai-sdk/provider/-/provider-2.0.0.tgz#b853c739d523b33675bc74b6c506b2c690bc602b"
+  integrity sha512-6o7Y2SeO9vFKB8lArHXehNuusnpddKPk7xqL7T2/b+OvXMRIXUO1rR4wcv1hAFUAT9avGZshty3Wlua/XA7TvA==
+  dependencies:
+    json-schema "^0.4.0"
+
 "@esbuild/aix-ppc64@0.25.12":
   version "0.25.12"
   resolved "https://registry.yarnpkg.com/@esbuild/aix-ppc64/-/aix-ppc64-0.25.12.tgz#80fcbe36130e58b7670511e888b8e88a259ed76c"
@@ -164,6 +197,25 @@
   version "1.5.5"
   resolved "https://registry.yarnpkg.com/@jridgewell/sourcemap-codec/-/sourcemap-codec-1.5.5.tgz#6912b00d2c631c0d15ce1a7ab57cd657f2a8f8ba"
   integrity sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==
+
+"@openrouter/ai-sdk-provider@^1.2.8":
+  version "1.2.8"
+  resolved "https://registry.yarnpkg.com/@openrouter/ai-sdk-provider/-/ai-sdk-provider-1.2.8.tgz#1d4c4e2b0872f39da638b18952d848f960a72804"
+  integrity sha512-pQT8AzZBKg9f4bkt4doF486ZlhK0XjKkevrLkiqYgfh1Jplovieu28nK4Y+xy3sF18/mxjqh9/2y6jh01qzLrA==
+  dependencies:
+    "@openrouter/sdk" "^0.1.8"
+
+"@openrouter/sdk@^0.1.8":
+  version "0.1.27"
+  resolved "https://registry.yarnpkg.com/@openrouter/sdk/-/sdk-0.1.27.tgz#d02a82b0f534c991602e649dafb15d2140b5844d"
+  integrity sha512-RH//L10bSmc81q25zAZudiI4kNkLgxF2E+WU42vghp3N6TEvZ6F0jK7uT3tOxkEn91gzmMw9YVmDENy7SJsajQ==
+  dependencies:
+    zod "^3.25.0 || ^4.0.0"
+
+"@opentelemetry/api@1.9.0":
+  version "1.9.0"
+  resolved "https://registry.yarnpkg.com/@opentelemetry/api/-/api-1.9.0.tgz#d03eba68273dc0f7509e2a3d5cba21eae10379fe"
+  integrity sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==
 
 "@rollup/rollup-android-arm-eabi@4.53.3":
   version "4.53.3"
@@ -366,6 +418,11 @@
   dependencies:
     "@types/node" "*"
 
+"@vercel/oidc@3.0.5":
+  version "3.0.5"
+  resolved "https://registry.yarnpkg.com/@vercel/oidc/-/oidc-3.0.5.tgz#bd8db7ee777255c686443413492db4d98ef49657"
+  integrity sha512-fnYhv671l+eTTp48gB4zEsTW/YtRgRPnkI2nT7x6qw5rkI1Lq2hTmQIpHPgyThI0znLK+vX2n9XxKdXZ7BUbbw==
+
 "@vitest/expect@4.0.13":
   version "4.0.13"
   resolved "https://registry.yarnpkg.com/@vitest/expect/-/expect-4.0.13.tgz#2ee6e8b3016c08bce6544ea18dffddc0015fcc7e"
@@ -430,6 +487,16 @@ agentkeepalive@^4.1.0:
   integrity sha512-kja8j7PjmncONqaTsB8fQ+wE2mSU2DJ9D4XKoJ5PFWIdRMa6SLSN1ff4mOr4jCbfRSsxR4keIiySJU0N9T5hIQ==
   dependencies:
     humanize-ms "^1.2.1"
+
+ai@^5.0.104:
+  version "5.0.104"
+  resolved "https://registry.yarnpkg.com/ai/-/ai-5.0.104.tgz#b2a1bf7fb2bd50e1f63c945353a28949595a29b7"
+  integrity sha512-MZOkL9++nY5PfkpWKBR3Rv+Oygxpb9S16ctv8h91GvrSif7UnNEdPMVZe3bUyMd2djxf0AtBk/csBixP0WwWZQ==
+  dependencies:
+    "@ai-sdk/gateway" "2.0.17"
+    "@ai-sdk/provider" "2.0.0"
+    "@ai-sdk/provider-utils" "3.0.18"
+    "@opentelemetry/api" "1.9.0"
 
 assertion-error@^2.0.1:
   version "2.0.1"
@@ -587,6 +654,11 @@ estree-walker@^3.0.3:
   dependencies:
     "@types/estree" "^1.0.0"
 
+eventsource-parser@^3.0.6:
+  version "3.0.6"
+  resolved "https://registry.yarnpkg.com/eventsource-parser/-/eventsource-parser-3.0.6.tgz#292e165e34cacbc936c3c92719ef326d4aeb4e90"
+  integrity sha512-Vo1ab+QXPzZ4tCa8SwIHJFaSzy4R6SHf7BY79rFBDf0idraZWAkYrDjDj8uWaSm3S2TK+hJ7/t1CEmZ7jXw+pg==
+
 expect-type@^1.2.2:
   version "1.2.2"
   resolved "https://registry.yarnpkg.com/expect-type/-/expect-type-1.2.2.tgz#c030a329fb61184126c8447585bc75a7ec6fbff3"
@@ -709,6 +781,11 @@ ioredis@^5.8.2:
     redis-errors "^1.2.0"
     redis-parser "^3.0.0"
     standard-as-callback "^2.1.0"
+
+json-schema@^0.4.0:
+  version "0.4.0"
+  resolved "https://registry.yarnpkg.com/json-schema/-/json-schema-0.4.0.tgz#f7de4cf6efab838ebaeb3236474cbba5a1930ab5"
+  integrity sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA==
 
 lodash.defaults@^4.2.0:
   version "4.2.0"
@@ -987,7 +1064,7 @@ ws@^8.18.2:
   resolved "https://registry.yarnpkg.com/ws/-/ws-8.18.3.tgz#b56b88abffde62791c639170400c93dcb0c95472"
   integrity sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg==
 
-zod@^4.1.13:
+"zod@^3.25.0 || ^4.0.0", zod@^4.1.13:
   version "4.1.13"
   resolved "https://registry.yarnpkg.com/zod/-/zod-4.1.13.tgz#93699a8afe937ba96badbb0ce8be6033c0a4b6b1"
   integrity sha512-AvvthqfqrAhNH9dnfmrfKzX5upOdjUVJYFqNSlkmGf64gRaTzlPwz99IHYnVs28qYAybvAlBV+H7pn0saFY4Ig==

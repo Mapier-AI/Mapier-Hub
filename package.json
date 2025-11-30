@@ -15,9 +15,12 @@
     "gen:types": "supabase gen types typescript --local > src/types/database.types.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^2.0.74",
     "@googlemaps/google-maps-services-js": "^3.4.2",
     "@hono/node-server": "^1.19.6",
+    "@openrouter/ai-sdk-provider": "^1.2.8",
     "@supabase/supabase-js": "^2.84.0",
+    "ai": "^5.0.104",
     "axios": "^1.13.2",
     "dotenv": "^17.2.3",
     "hono": "^4.10.6",
