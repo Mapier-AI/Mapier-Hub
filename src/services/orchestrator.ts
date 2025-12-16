@@ -4,6 +4,7 @@ import { GooglePlacesProvider } from '../providers/google.provider.js'
 import { RefugeRestroomsProvider } from '../providers/refuge.provider.js'
 import { BreweryProvider } from '../providers/brewery.provider.js'
 import { cacheService } from './cache.service.js'
+import { supabase } from '../config/supabase.js'
 import { env } from '../config/env.js'
 
 /**
@@ -431,6 +432,158 @@ export class QueryOrchestrator {
     }
 
     return await googleProvider.autocomplete(input, location)
+  }
+
+  /**
+   * Get Google Place details with caching (30-day TTL)
+   * Used for progressive place detail loading
+   */
+  async getGooglePlaceDetailsCached(googlePlaceId: string): Promise<any> {
+    // Check cache first (~10ms)
+    const cached = await cacheService.getPlace(googlePlaceId)
+    if (cached) {
+      console.log('[Orchestrator] Google place cache hit:', googlePlaceId)
+      return cached
+    }
+
+    // Fetch from Google Places API (100-200ms)
+    const googleProvider = this.providers.get('google') as GooglePlacesProvider | undefined
+    if (!googleProvider) {
+      throw new Error('Google Places provider not available')
+    }
+
+    const place = await googleProvider.getPlace(googlePlaceId)
+    if (!place) {
+      throw new Error(`Place not found in Google Places API: ${googlePlaceId}`)
+    }
+
+    // Cache for 30 days (Google ToS compliant)
+    await cacheService.setPlace(googlePlaceId, place, 30 * 24 * 60 * 60)
+    console.log('[Orchestrator] Cached Google place:', googlePlaceId)
+
+    return place
+  }
+
+  /**
+   * Match google_place_id to canonical POI in database
+   *
+   * Strategy:
+   * 1. Check if google_place_id already linked (indexed lookup, <1ms)
+   * 2. If not, fuzzy match by coordinates + name similarity (~50ms)
+   * 3. Return matched POI or null
+   */
+  async matchCanonicalPOI(
+    googlePlaceId: string,
+    coordinate?: { lat: number; lon: number },
+    name?: string
+  ): Promise<any> {
+    // Step 1: Try exact match by google_place_id (fast path)
+    const { data: exactMatch, error: exactError } = await supabase
+      .from('places')
+      .select('*')
+      .eq('google_place_id', googlePlaceId)
+      .single()
+
+    if (exactMatch && !exactError) {
+      console.log('[Orchestrator] Exact POI match by google_place_id:', exactMatch.id)
+      return exactMatch
+    }
+
+    // Step 2: Fuzzy match by coordinates + name (slow path, but necessary for new POIs)
+    if (coordinate && name) {
+      const { data: similarPlaces, error: fuzzyError } = await supabase.rpc(
+        'find_similar_places',
+        {
+          p_name: name,
+          p_lat: coordinate.lat,
+          p_lon: coordinate.lon,
+          p_radius_meters: 50,
+        }
+      )
+
+      if (!fuzzyError && similarPlaces && similarPlaces.length > 0) {
+        const bestMatch = similarPlaces[0]
+
+        // Only return if similarity is high enough
+        if (bestMatch.similarity > 0.7) {
+          console.log(
+            '[Orchestrator] Fuzzy POI match:',
+            bestMatch.id,
+            'similarity:',
+            bestMatch.similarity
+          )
+          return bestMatch
+        }
+      }
+    }
+
+    console.log('[Orchestrator] No POI match found for:', googlePlaceId)
+    return null
+  }
+
+  /**
+   * Fetch enrichments (posts, tags, etc.) for a canonical POI
+   */
+  async fetchEnrichments(poiId: string): Promise<any> {
+    // Fetch recent posts with author profiles
+    const { data: posts, error } = await supabase
+      .from('posts')
+      .select(
+        `
+        id,
+        content,
+        created_at,
+        like_count,
+        reply_count,
+        repost_count,
+        media,
+        hashtags,
+        author_id,
+        profiles!posts_author_id_fkey (
+          id,
+          username,
+          name,
+          avatar_url
+        )
+      `
+      )
+      .eq('poi_id', poiId)
+      .eq('is_deleted', false)
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    if (error) {
+      console.error('[Orchestrator] Failed to fetch enrichments:', error)
+      return { posts: [], post_count: 0 }
+    }
+
+    console.log('[Orchestrator] Fetched enrichments for POI:', poiId, 'posts:', posts?.length || 0)
+
+    return {
+      posts: posts || [],
+      post_count: posts?.length || 0,
+    }
+  }
+
+  /**
+   * Link google_place_id to canonical POI (background task, async)
+   * Called after successful fuzzy match to improve future lookups
+   */
+  async linkGooglePlaceId(poiId: string, googlePlaceId: string): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('places')
+        .update({ google_place_id: googlePlaceId })
+        .eq('id', poiId)
+
+      if (error) {
+        console.error('[Orchestrator] Failed to link google_place_id:', error)
+      } else {
+        console.log('[Orchestrator] Linked google_place_id to POI:', poiId, '←', googlePlaceId)
+      }
+    } catch (err) {
+      console.error('[Orchestrator] Exception linking google_place_id:', err)
+    }
   }
 
   /**

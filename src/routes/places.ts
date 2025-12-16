@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { streamSSE } from 'hono/streaming'
 import { orchestrator } from '../services/orchestrator.js'
 
 const places = new Hono()
@@ -45,6 +46,163 @@ places.get('/autocomplete', async (c) => {
       500
     )
   }
+})
+
+/**
+ * GET /api/v1/places/details-stream
+ * Progressive enhancement: Stream place details as they become available
+ *
+ * Flow:
+ * 1. Immediately stream Google Places details (50-150ms)
+ * 2. Parallel: Check if POI already matched (indexed lookup, <1ms)
+ *    - If matched: Stream POI + enrichments immediately
+ *    - If not matched: Fuzzy match (50ms), then stream POI + enrichments
+ *
+ * Uses Server-Sent Events (SSE) for progressive data loading
+ */
+places.get('/details-stream', async (c) => {
+  const googlePlaceId = c.req.query('google_place_id')
+  const lat = c.req.query('lat')
+  const lon = c.req.query('lon')
+  const name = c.req.query('name')
+
+  if (!googlePlaceId) {
+    return c.json({ success: false, error: 'google_place_id is required' }, 400)
+  }
+
+  return streamSSE(c, async (stream) => {
+    try {
+      const startTime = Date.now()
+
+      // Step 1: Fetch Google details and check for existing match in parallel
+      const [googleDetails, existingMatch] = await Promise.all([
+        orchestrator.getGooglePlaceDetailsCached(googlePlaceId),
+        // Quick indexed lookup only (no fuzzy match yet)
+        orchestrator.matchCanonicalPOI(googlePlaceId, undefined, undefined),
+      ])
+
+      // Event 1: Stream Google details immediately
+      await stream.writeSSE({
+        data: JSON.stringify({
+          type: 'google',
+          data: googleDetails,
+          latency_ms: Date.now() - startTime,
+        }),
+      })
+
+      // Step 2: Handle POI matching
+      let canonicalPoi = existingMatch
+
+      if (existingMatch) {
+        // Fast path: POI already matched, stream immediately
+        console.log('[API] Fast path: POI already matched')
+
+        await stream.writeSSE({
+          data: JSON.stringify({
+            type: 'poi_match',
+            data: {
+              poi_id: existingMatch.id,
+              confidence: 1.0,
+              source_type: existingMatch.source_type,
+              matched: true,
+              fast_path: true,
+            },
+            latency_ms: Date.now() - startTime,
+          }),
+        })
+
+        // Fetch and stream enrichments immediately
+        const enrichments = await orchestrator.fetchEnrichments(existingMatch.id)
+        await stream.writeSSE({
+          data: JSON.stringify({
+            type: 'enrichments',
+            data: enrichments,
+            latency_ms: Date.now() - startTime,
+          }),
+        })
+      } else {
+        // Slow path: Need fuzzy matching
+        console.log('[API] Slow path: Fuzzy matching required')
+
+        const coordinate =
+          lat && lon ? { lat: parseFloat(lat), lon: parseFloat(lon) } : undefined
+
+        if (coordinate && name) {
+          // Try fuzzy match
+          canonicalPoi = await orchestrator.matchCanonicalPOI(googlePlaceId, coordinate, name)
+
+          if (canonicalPoi) {
+            await stream.writeSSE({
+              data: JSON.stringify({
+                type: 'poi_match',
+                data: {
+                  poi_id: canonicalPoi.id,
+                  confidence: canonicalPoi.similarity || 0.8,
+                  source_type: canonicalPoi.source_type,
+                  matched: true,
+                  fast_path: false,
+                },
+                latency_ms: Date.now() - startTime,
+              }),
+            })
+
+            // Fetch and stream enrichments
+            const enrichments = await orchestrator.fetchEnrichments(canonicalPoi.id)
+            await stream.writeSSE({
+              data: JSON.stringify({
+                type: 'enrichments',
+                data: enrichments,
+                latency_ms: Date.now() - startTime,
+              }),
+            })
+
+            // Background: Link google_place_id for future fast path
+            void orchestrator.linkGooglePlaceId(canonicalPoi.id, googlePlaceId)
+          } else {
+            // No match found
+            await stream.writeSSE({
+              data: JSON.stringify({
+                type: 'poi_match',
+                data: {
+                  matched: false,
+                },
+                latency_ms: Date.now() - startTime,
+              }),
+            })
+          }
+        } else {
+          // Missing coordinate/name for fuzzy match
+          await stream.writeSSE({
+            data: JSON.stringify({
+              type: 'poi_match',
+              data: {
+                matched: false,
+                reason: 'Missing coordinate or name for fuzzy matching',
+              },
+              latency_ms: Date.now() - startTime,
+            }),
+          })
+        }
+      }
+
+      // Event: Complete
+      await stream.writeSSE({
+        data: JSON.stringify({
+          type: 'complete',
+          total_latency_ms: Date.now() - startTime,
+        }),
+      })
+    } catch (error) {
+      console.error('[API] Stream error:', error)
+      await stream.writeSSE({
+        data: JSON.stringify({
+          type: 'error',
+          error: 'Stream failed',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        }),
+      })
+    }
+  })
 })
 
 /**
