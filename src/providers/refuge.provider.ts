@@ -118,6 +118,12 @@ export class RefugeRestroomsProvider extends BaseProvider {
       location: {
         lat: restroom.latitude,
         lon: restroom.longitude,
+        address: {
+          street: restroom.street,
+          city: restroom.city,
+          state: restroom.state,
+          country: restroom.country,
+        },
       },
       category: {
         primary: 'restroom',
@@ -132,10 +138,6 @@ export class RefugeRestroomsProvider extends BaseProvider {
         changing_table: restroom.changing_table,
         directions: restroom.directions,
         comment: restroom.comment,
-        street: restroom.street,
-        city: restroom.city,
-        state: restroom.state,
-        country: restroom.country,
         upvote: restroom.upvote,
         downvote: restroom.downvote,
         created_at: restroom.created_at,
