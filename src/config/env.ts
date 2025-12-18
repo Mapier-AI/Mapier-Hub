@@ -22,7 +22,6 @@ const envSchema = z.object({
   GOOGLE_PLACES_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   OPENROUTER_API_KEY: z.string().optional(),
-  NPS_API_KEY: z.string().optional(),
 })
 
 // Parse and validate environment variables

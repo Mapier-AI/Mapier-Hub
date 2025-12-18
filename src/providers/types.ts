@@ -18,14 +18,6 @@ export interface SearchQuery {
   offset?: number // Pagination offset, default: 0
 }
 
-export interface BoundedSearchQuery {
-  bounds: {
-    northeast: { lat: number; lon: number }
-    southwest: { lat: number; lon: number }
-  }
-  limit?: number
-}
-
 // Place data structure (canonical format)
 export interface Place {
   id: string
@@ -39,32 +31,10 @@ export interface Place {
     secondary?: string[]
   }
   confidence: number // 0-1, data quality score
-
-  // Contact info
   socials?: string[]
   websites?: string[]
-  phones?: string[]
-  emails?: string[]
-
-  // Address info
-  street?: string
-  city?: string
-  state?: string
-  postcode?: string
-  country?: string
-
-  // Metadata
-  brand?: string
-  operating_status?: string
-  google_place_id?: string
-
-  // Flexible attributes (rating, hours, etc.) - mapped to 'attributes' column or jsonb
-  attributes?: Record<string, any>
-
-  // Runtime only
+  attributes: Record<string, any> // Flexible attributes (rating, hours, etc.)
   distance?: number // Distance from search point in meters
-
-  // Provider metadata (merged into 'raw' jsonb in DB)
   providers?: {
     [key: string]: {
       externalId: string

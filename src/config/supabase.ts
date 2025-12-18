@@ -21,11 +21,7 @@ export const supabase = createClient(
  */
 export async function testSupabaseConnection(): Promise<boolean> {
   try {
-    // const { data, error } = await supabase.from('places').select('count').limit(1).single()
-    const { error } = await supabase
-      .from('places')
-      .select('id', { head: true }) // returns headers only, no row payload
-      .limit(1)
+    const { data, error } = await supabase.from('places').select('count').limit(1).single()
 
     if (error) throw error
 
