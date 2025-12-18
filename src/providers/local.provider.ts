@@ -126,7 +126,7 @@ export class LocalDatabaseProvider extends BaseProvider {
    */
   async healthCheck(): Promise<boolean> {
     try {
-      const { error } = await supabase.from('places').select('count').limit(1)
+      const { error } = await supabase.from('places').select('id').limit(1)
       return !error
     } catch (error) {
       this.log('error', 'Health check failed', error)
