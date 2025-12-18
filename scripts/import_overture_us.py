@@ -1,33 +1,19 @@
 #!/usr/bin/env python3
 """
 Import US POIs from Overture Maps into Supabase.
-
-- If a POI doesn't exist: INSERT it
-- If a POI exists: UPDATE it (upsert)
-
-Usage:
-    python import_overture_us.py
-
-Options:
-    --limit N       Only import N records (for testing)
-    --category CAT  Only import specific category (e.g., 'restaurant')
-    --state ST      Only import specific state (e.g., 'CA')
-    --dry-run       Just count records, don't import
-    --yes           Skip confirmation prompt
-
-Future: For incremental updates using GERS changelog, see:
-https://docs.overturemaps.org/gers/changelog/
+Slim version: skips raw metadata to save space, keeps only primary source attribution.
 """
 
 import os
 import sys
-import json
 import argparse
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 import duckdb
+import psycopg2
+from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 from supabase import create_client
 from tqdm import tqdm
@@ -39,18 +25,107 @@ load_dotenv(env_path)
 # Configuration
 OVERTURE_VERSION = "2025-11-19.0"
 OVERTURE_PATH = f"s3://overturemaps-us-west-2/release/{OVERTURE_VERSION}/theme=places/*/*"
-BATCH_SIZE = 500
+BATCH_SIZE = 1000
 
 
 def get_supabase_client():
     url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_SERVICE_KEY")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
     if not url or not key:
-        print("Error: SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables required")
+        print("Error: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables required")
         sys.exit(1)
 
     return create_client(url, key)
+
+
+def get_postgres_connection():
+    """Connect to local Postgres database."""
+    conn_params = {
+        'host': os.environ.get('POSTGRES_HOST', 'localhost'),
+        'port': os.environ.get('POSTGRES_PORT', '5432'),
+        'database': os.environ.get('POSTGRES_DB', 'mapier'),
+        'user': os.environ.get('POSTGRES_USER', 'postgres'),
+        'password': os.environ.get('POSTGRES_PASSWORD', 'postgres')
+    }
+
+    try:
+        conn = psycopg2.connect(**conn_params)
+        print(f"✓ Connected to {conn_params['host']}:{conn_params['port']}/{conn_params['database']}")
+        return conn
+    except Exception as e:
+        print(f"Error connecting to Postgres: {e}")
+        sys.exit(1)
+
+
+def insert_batch_postgres(conn, batch):
+    """Insert batch of records into Postgres using UPSERT."""
+    if not batch:
+        return
+
+    cursor = conn.cursor()
+
+    # Build INSERT ... ON CONFLICT query for slim schema
+    insert_query = """
+        INSERT INTO places (
+            id, name, confidence, primary_category, alternate_categories,
+            brand, operating_status, websites, socials, phones, emails,
+            street, city, state, postcode, country, lon, lat,
+            updated_at, source_type, primary_source
+        ) VALUES %s
+        ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            confidence = EXCLUDED.confidence,
+            primary_category = EXCLUDED.primary_category,
+            alternate_categories = EXCLUDED.alternate_categories,
+            brand = EXCLUDED.brand,
+            operating_status = EXCLUDED.operating_status,
+            websites = EXCLUDED.websites,
+            socials = EXCLUDED.socials,
+            phones = EXCLUDED.phones,
+            emails = EXCLUDED.emails,
+            street = EXCLUDED.street,
+            city = EXCLUDED.city,
+            state = EXCLUDED.state,
+            postcode = EXCLUDED.postcode,
+            country = EXCLUDED.country,
+            lon = EXCLUDED.lon,
+            lat = EXCLUDED.lat,
+            updated_at = EXCLUDED.updated_at,
+            source_type = EXCLUDED.source_type,
+            primary_source = EXCLUDED.primary_source
+    """
+
+    # Convert batch to tuples
+    values = []
+    for record in batch:
+        values.append((
+            record['id'],
+            record['name'],
+            record['confidence'],
+            record['primary_category'],
+            record['alternate_categories'],
+            record['brand'],
+            record['operating_status'],
+            record['websites'],
+            record['socials'],
+            record['phones'],
+            record['emails'],
+            record['street'],
+            record['city'],
+            record['state'],
+            record['postcode'],
+            record['country'],
+            record['lon'],
+            record['lat'],
+            record['updated_at'],
+            record['source_type'],
+            record['primary_source']
+        ))
+
+    execute_values(cursor, insert_query, values)
+    conn.commit()
+    cursor.close()
 
 
 def setup_duckdb():
@@ -64,15 +139,20 @@ def setup_duckdb():
 def build_query(
     limit: Optional[int] = None,
     category: Optional[str] = None,
-    state: Optional[str] = None
+    state: Optional[str] = None,
+    offset: Optional[int] = None
 ) -> str:
     """Build the DuckDB query for extracting US POIs."""
 
     where_clauses = [
         "addresses[1].country = 'US'",
-        # Filter to continental US + Alaska + Hawaii coordinates
-        "ST_X(geometry) BETWEEN -180 AND -65",
-        "ST_Y(geometry) BETWEEN 18 AND 72"
+        # US mainland bounding box
+        "ST_X(geometry) BETWEEN -128.359795 AND -56.728935",
+        "ST_Y(geometry) BETWEEN 24.132028 AND 49.898394",
+        # Only high confidence POIs (>= 0.77)
+        "confidence >= 0.77",
+        # Only fresh data: source update_time must be in 2025 or later
+        "sources[1].update_time >= '2025-01-01'"
     ]
 
     if category:
@@ -103,18 +183,16 @@ def build_query(
         addresses[1].country AS country,
         ST_X(geometry) AS lon,
         ST_Y(geometry) AS lat,
-        to_json(struct_pack(
-            sources := sources,
-            bbox := bbox,
-            version := version,
-            basic_category := basic_category
-        )) AS raw
+        sources[1].dataset AS primary_source
     FROM read_parquet('{OVERTURE_PATH}')
     WHERE {where_clause}
     """
 
     if limit:
         query += f" LIMIT {limit}"
+
+    if offset:
+        query += f" OFFSET {offset}"
 
     return query
 
@@ -130,17 +208,9 @@ def transform_record(row: tuple, columns: list) -> dict:
         else:
             record[arr_field] = None
 
-    # Handle JSON
-    if record['raw']:
-        if isinstance(record['raw'], str):
-            record['raw'] = json.loads(record['raw'])
-        elif isinstance(record['raw'], dict):
-            record['raw'] = json.loads(json.dumps(record['raw'], default=str))
-
     # Add metadata
-    record['overture_version'] = OVERTURE_VERSION
-    record['overture_updated_at'] = datetime.utcnow().isoformat()
     record['updated_at'] = datetime.utcnow().isoformat()
+    record['source_type'] = 'overture'
 
     return record
 
@@ -149,8 +219,10 @@ def count_records(con: duckdb.DuckDBPyConnection, category: Optional[str], state
     """Count total records to import."""
     where_clauses = [
         "addresses[1].country = 'US'",
-        "ST_X(geometry) BETWEEN -180 AND -65",
-        "ST_Y(geometry) BETWEEN 18 AND 72"
+        "ST_X(geometry) BETWEEN -128.359795 AND -56.728935",
+        "ST_Y(geometry) BETWEEN 24.132028 AND 49.898394",
+        "confidence >= 0.77",
+        "sources[1].update_time >= '2025-01-01'"
     ]
 
     if category:
@@ -170,64 +242,53 @@ def count_records(con: duckdb.DuckDBPyConnection, category: Optional[str], state
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Import US POIs from Overture Maps")
+    parser = argparse.ArgumentParser(description="Import US POIs from Overture Maps (Slim Version)")
     parser.add_argument("--limit", type=int, help="Limit number of records to import")
-    parser.add_argument("--category", type=str, help="Filter by category (e.g., 'restaurant')")
-    parser.add_argument("--state", type=str, help="Filter by state (e.g., 'CA')")
-    parser.add_argument("--dry-run", action="store_true", help="Don't actually insert, just show stats")
+    parser.add_argument("--offset", type=int, help="Skip N records (for resuming)")
+    parser.add_argument("--category", type=str, help="Filter by category")
+    parser.add_argument("--state", type=str, help="Filter by state")
+    parser.add_argument("--dry-run", action="store_true", help="Don't actually insert")
     parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
+    parser.add_argument("--local", action="store_true", help="Use local Postgres instead of Supabase")
     args = parser.parse_args()
 
     print("=" * 60)
-    print("Overture Maps US POI Importer")
+    print("Overture Maps Slim Importer (No RAW metadata)")
     print(f"Version: {OVERTURE_VERSION}")
+    print("Filters: confidence >= 0.77, source update_time >= 2025")
+    print(f"Target: {'Local Postgres' if args.local else 'Supabase'}")
     print("=" * 60)
 
-    print("\nSetting up connections...")
-    supabase = get_supabase_client()
+    if args.local:
+        db_conn = get_postgres_connection()
+    else:
+        db_conn = get_supabase_client()
+
     con = setup_duckdb()
 
-    # Count total records
-    print("Counting records to import (this may take a few minutes)...")
+    print("Counting records to import...")
     total = count_records(con, args.category, args.state)
-
     if args.limit:
         total = min(total, args.limit)
 
     print(f"\nRecords to import: {total:,}")
 
-    if args.category:
-        print(f"  Filtered by category: {args.category}")
-    if args.state:
-        print(f"  Filtered by state: {args.state}")
-
     if args.dry_run:
-        print("\n[Dry run] - exiting without import")
         return
 
-    # Confirm for large imports
     if total > 10000 and not args.yes:
         confirm = input(f"\nThis will upsert {total:,} records. Continue? [y/N] ")
         if confirm.lower() != 'y':
-            print("Aborted.")
             return
 
-    # Build query
-    query = build_query(
-        limit=args.limit,
-        category=args.category,
-        state=args.state
-    )
-
+    query = build_query(limit=args.limit, category=args.category, state=args.state, offset=args.offset)
     columns = [
         'id', 'name', 'confidence', 'primary_category', 'alternate_categories',
         'brand', 'operating_status', 'websites', 'socials', 'phones', 'emails',
-        'street', 'city', 'state', 'postcode', 'country', 'lon', 'lat', 'raw'
+        'street', 'city', 'state', 'postcode', 'country', 'lon', 'lat', 'primary_source'
     ]
 
     print(f"\nImporting in batches of {BATCH_SIZE}...")
-
-    # Execute query and fetch in batches
     result = con.execute(query)
 
     imported = 0
@@ -252,25 +313,24 @@ def main():
 
             if batch:
                 try:
-                    # Upsert batch - inserts new records, updates existing
-                    supabase.table('places').upsert(
-                        batch,
-                        on_conflict='id'
-                    ).execute()
+                    if args.local:
+                        insert_batch_postgres(db_conn, batch)
+                    else:
+                        db_conn.table('places').upsert(batch, on_conflict='id').execute()
                     imported += len(batch)
-                except Exception as e:
-                    # Try one by one on batch failure
+                except Exception:
+                    # Fallback to one-by-one for error identification
                     for record in batch:
                         try:
-                            supabase.table('places').upsert(
-                                record,
-                                on_conflict='id'
-                            ).execute()
+                            if args.local:
+                                insert_batch_postgres(db_conn, [record])
+                            else:
+                                db_conn.table('places').upsert(record, on_conflict='id').execute()
                             imported += 1
                         except Exception as e2:
                             errors += 1
                             if len(error_samples) < 5:
-                                error_samples.append(f"Insert error for {record.get('id', '?')}: {e2}")
+                                error_samples.append(f"Insert error: {e2}")
 
             pbar.update(len(rows))
 
@@ -284,13 +344,8 @@ def main():
         for err in error_samples:
             print(f"  - {err}")
 
-    # Update geometry column
-    print("\nNote: Run this SQL to update geometry column:")
-    print("""
-    UPDATE places
-    SET geom = ST_SetSRID(ST_MakePoint(lon, lat), 4326)
-    WHERE geom IS NULL AND lon IS NOT NULL AND lat IS NOT NULL;
-    """)
+    if args.local:
+        db_conn.close()
 
     print(f"\n{'=' * 60}")
     print("Done!")

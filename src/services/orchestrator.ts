@@ -504,15 +504,22 @@ export class QueryOrchestrator {
       if (!fuzzyError && similarPlaces && similarPlaces.length > 0) {
         const bestMatch = similarPlaces[0]
 
-        // Only return if similarity is high enough
-        if (bestMatch.similarity > 0.7) {
+        // Only return if similarity is high enough (0.3 = 30% is minimum from SQL function)
+        // We trust matches > 0.4 (40%) when they're also within the distance radius
+        if (bestMatch.name_similarity > 0.4) {
           console.log(
             '[Orchestrator] Fuzzy POI match:',
             bestMatch.id,
             'similarity:',
-            bestMatch.similarity
+            bestMatch.name_similarity
           )
-          return bestMatch
+          return { ...bestMatch, similarity: bestMatch.name_similarity }
+        } else {
+          console.log(
+            '[Orchestrator] Fuzzy match below threshold:',
+            bestMatch.name_similarity,
+            'need > 0.4'
+          )
         }
       }
     }
