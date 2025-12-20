@@ -4,6 +4,7 @@ import { GooglePlacesProvider } from '../providers/google.provider.js'
 import { RefugeRestroomsProvider } from '../providers/refuge.provider.js'
 import { BreweryProvider } from '../providers/brewery.provider.js'
 import { cacheService } from './cache.service.js'
+import { databaseService } from './database.service.js'
 import { env } from '../config/env.js'
 
 /**
@@ -12,6 +13,10 @@ import { env } from '../config/env.js'
  */
 export class QueryOrchestrator {
   private providers: Map<string, PlaceProvider> = new Map()
+  private providerLayerSlugMap: Record<string, string> = {
+    'refuge': 'refugee-restroom',
+    'brewery': 'brewery', // Implicitly handled by fallback
+  }
 
   constructor() {
     // Always register local provider
@@ -76,10 +81,21 @@ export class QueryOrchestrator {
 
     const result = await localProvider.search(query)
 
-    // Cache the result (5 minutes TTL)
-    await cacheService.setSearchResults(cacheParams, result, 300)
+    // NEW: Generic enrichment with all applicable providers
+    const enrichedPlaces = await this.enrichWithProviders(
+      result.places,
+      query
+    )
 
-    return result
+    const finalResult = {
+      ...result,
+      places: enrichedPlaces,
+    }
+
+    // Cache the result (5 minutes TTL)
+    // await cacheService.setSearchResults(cacheParams, finalResult, 300)
+
+    return finalResult
   }
 
   /**
@@ -467,6 +483,175 @@ export class QueryOrchestrator {
         friends_visited: [],
       },
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Enrichment Logic (Generic Providers)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Enrich local places with data from external providers
+   */
+  private async enrichWithProviders(
+    places: Place[],
+    query: SearchQuery
+  ): Promise<Place[]> {
+    // 1. Identify which providers to query
+    // Exclude 'local' (already queried) and 'google' (different logic)
+    const externalProviders = Array.from(this.providers.values()).filter(p =>
+      p.name !== 'local' && p.name !== 'google'
+    )
+
+    const newlyDiscoveredPlaces: Place[] = []
+
+    // 2. Query each provider in parallel
+    for (const provider of externalProviders) {
+      try {
+        // Use the provider-specific search but apply defaults if needed
+        // Note: The provider implementations should handle logic like "only search if category valid"
+        const result = await provider.search({
+          ...query,
+          location: { ...query.location, radius: query.location.radius || 1000 },
+          // Limit enrichment searches to avoid spamming APIs
+          limit: 50
+        })
+
+        console.log(`[Enrichment] Provider '${provider.name}' returned ${result.places.length} places`)
+
+        // 3. Link results to local POIs and collect them
+        for (const externalPlace of result.places) {
+          try {
+            const linkedPOI = await this.linkExternalPlaceToPOI(externalPlace, provider.name)
+            newlyDiscoveredPlaces.push(linkedPOI)
+          } catch (linkError) {
+            console.error(`[Enrichment] Failed to link place from ${provider.name}:`, linkError)
+          }
+        }
+      } catch (error) {
+        console.error(`[Enrichment] Provider '${provider.name}' failed during enrichment:`, error)
+        // Log error but continue
+      }
+    }
+
+    // Combine original matches with new/linked matches
+    // Deduplicate logic handles the overlap (if matchedPOI was already in 'places')
+    const combinedPlaces = [...places, ...newlyDiscoveredPlaces]
+    const uniquePlaces = this.deduplicatePlaces(combinedPlaces)
+
+    // 4. Reload places with all attached layers
+    return this.loadPlacesWithLayers(uniquePlaces)
+  }
+
+  /**
+   * Link an external provider place to a Mapier POI
+   */
+  private async linkExternalPlaceToPOI(externalPlace: Place, providerName: string): Promise<Place> {
+    // 1. Resolve layer slug
+    const layerSlug = this.providerLayerSlugMap[providerName] || providerName
+
+    // 2. Try to fuzzy match an existing POI in our DB
+    const matchedPOI = await databaseService.fuzzyMatchPOI({
+      lat: externalPlace.location.lat,
+      lon: externalPlace.location.lon,
+      name: externalPlace.name,
+      radius: 50, // 50 meters tolerance
+    })
+
+    if (!matchedPOI) {
+      // 3a. No match - create new POI
+      const newPOI = await databaseService.createPOI({
+        name: externalPlace.name,
+        location: externalPlace.location,
+        category: externalPlace.category,
+        confidence: 0.8 // Set a good default confidence for provider data
+        // Other fields like socials/websites are copied if present in creation logic
+      })
+
+      // Link new POI to provider layer
+      await databaseService.createPlaceLayer({
+        place_id: newPOI.id,
+        layer_slug: layerSlug,
+        external_id: externalPlace.providers && externalPlace.providers[providerName] ? externalPlace.providers[providerName].externalId : undefined,
+        layer_data: externalPlace.attributes,
+      })
+      return newPOI
+    }
+
+    // 3b. Match found - check if link exists
+    const existingLayer = await databaseService.getPlaceLayer(matchedPOI.id, layerSlug)
+
+    if (!existingLayer) {
+      // Link existing POI to this provider's layer
+      await databaseService.createPlaceLayer({
+        place_id: matchedPOI.id,
+        layer_slug: layerSlug,
+        external_id: externalPlace.providers && externalPlace.providers[providerName] ? externalPlace.providers[providerName].externalId : undefined,
+        layer_data: externalPlace.attributes,
+      })
+    } else {
+      // 4. Update data if changed
+      if (this.hasLayerDataChanged(existingLayer.layer_data, externalPlace.attributes)) {
+        await databaseService.updatePlaceLayer(existingLayer.id, {
+          layer_data: externalPlace.attributes,
+          last_synced: new Date(),
+        })
+      } else {
+        // Just touch timestamp
+        await databaseService.touchPlaceLayer(existingLayer.id)
+      }
+    }
+
+    return matchedPOI
+  }
+
+  /**
+   * Check if layer data has changed
+   */
+  private hasLayerDataChanged(existing: any, incoming: any): boolean {
+    // Simple deep strict equality check could be risky with order,
+    // but for now let's compare JSON strings of keys for simplicity or use a loop.
+    // Ideally we might want Lodash isEqual, but here is a simple shallow+ version.
+
+    const existingKeys = Object.keys(existing || {})
+    const incomingKeys = Object.keys(incoming || {})
+
+    if (existingKeys.length !== incomingKeys.length) return true
+
+    for (const key of incomingKeys) {
+      if (JSON.stringify(existing[key]) !== JSON.stringify(incoming[key])) {
+        return true
+      }
+    }
+    return false
+  }
+
+  // -------------------------------------------------------------------------
+  // Database Operations (Delegated to DatabaseService)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Load and attach layer data to places
+   */
+  private async loadPlacesWithLayers(places: Place[]): Promise<Place[]> {
+    if (places.length === 0) return []
+
+    const placeIds = places.map((p) => p.id)
+    const layersMap = await databaseService.loadPlaceLayers(placeIds)
+
+    return places.map((place) => {
+      const layers = layersMap.get(place.id)
+      if (!layers) return place
+
+      // Merge layer data into place
+      // We can put it in 'attributes.layers' or a dedicated field
+      return {
+        ...place,
+        attributes: {
+          ...place.attributes,
+          layers: layers,
+        },
+      }
+    })
   }
 }
 

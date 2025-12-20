@@ -25,6 +25,13 @@ export interface Place {
   location: {
     lat: number
     lon: number
+    address?: {
+      street?: string
+      city?: string
+      state?: string
+      postalCode?: string
+      country?: string
+    }
   }
   category: {
     primary: string
@@ -33,6 +40,10 @@ export interface Place {
   confidence: number // 0-1, data quality score
   socials?: string[]
   websites?: string[]
+  phones?: string[]
+  emails?: string[]
+  brand?: string
+  operating_status?: string
   attributes: Record<string, any> // Flexible attributes (rating, hours, etc.)
   distance?: number // Distance from search point in meters
   providers?: {
