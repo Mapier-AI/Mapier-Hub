@@ -395,8 +395,8 @@ export class QueryOrchestrator {
       try {
         const place = await provider.getPlace(id)
         if (place) {
-          // Cache for 30 minutes
-          await cacheService.setPlace(id, place, 1800)
+          // Cache for 30 days (default TTL in cache service)
+          await cacheService.setPlace(id, place)
           return place
         }
       } catch (error) {

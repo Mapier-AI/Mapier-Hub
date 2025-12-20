@@ -1,14 +1,14 @@
-import { Client, PlaceInputType } from '@googlemaps/google-maps-services-js'
+import { PlacesClient } from '@googlemaps/places'
 import { BaseProvider } from './base.js'
 import type { SearchQuery, ProviderResult, Place } from './types.js'
 import { env } from '../config/env.js'
 
 /**
  * Google Places Provider
- * Integrates Google Places API for POI search
+ * Integrates Google Places API (New) v1 for POI search
  */
 export class GooglePlacesProvider extends BaseProvider {
-  private client: Client
+  private client: PlacesClient
 
   constructor() {
     super({
@@ -18,7 +18,10 @@ export class GooglePlacesProvider extends BaseProvider {
       enabled: !!env.GOOGLE_PLACES_API_KEY,
     })
 
-    this.client = new Client({})
+    // Initialize PlacesClient with API key
+    this.client = new PlacesClient({
+      apiKey: env.GOOGLE_PLACES_API_KEY,
+    })
 
     if (!env.GOOGLE_PLACES_API_KEY) {
       this.log('warn', 'Google Places API key not configured. Provider disabled.')
@@ -43,27 +46,28 @@ export class GooglePlacesProvider extends BaseProvider {
 
     const { result, latency } = await this.measureTime(async () => {
       try {
-        const response = await this.client.placesNearby({
-          params: {
-            location: {
-              lat: query.location.lat,
-              lng: query.location.lon,
+        const [response] = await this.client.searchNearby({
+          locationRestriction: {
+            circle: {
+              center: {
+                latitude: query.location.lat,
+                longitude: query.location.lon,
+              },
+              radius: query.location.radius || 1000,
             },
-            radius: query.location.radius || 1000,
-            keyword: query.query,
-            type: this.mapCategoryToGoogleType(query.category),
-            key: env.GOOGLE_PLACES_API_KEY!,
           },
-          timeout: this.timeout,
-        })
+          maxResultCount: query.limit || 20,
+          ...(query.query && { keyword: query.query }),
+          ...(query.category && { includedTypes: [this.mapCategoryToGoogleType(query.category)] }),
+        } as any)
 
-        if (response.data.status !== 'OK' && response.data.status !== 'ZERO_RESULTS') {
-          throw new Error(`Google Places API error: ${response.data.status}`)
+        if (!response || !response.places) {
+          return []
         }
 
-        const places = response.data.results
+        const places = response.places
           .slice(0, query.limit || 20)
-          .map((place) => this.transformGooglePlace(place))
+          .map((place: any) => this.transformGooglePlace(place))
 
         return places
       } catch (error) {
@@ -95,19 +99,23 @@ export class GooglePlacesProvider extends BaseProvider {
     }
 
     try {
-      const response = await this.client.placeDetails({
-        params: {
-          place_id: id,
-          key: env.GOOGLE_PLACES_API_KEY!,
+      const [response] = await this.client.getPlace({
+        name: `places/${id}`,
+        // Request specific fields using field mask
+        // Equivalent to X-Goog-FieldMask header
+      } as any, {
+        otherArgs: {
+          headers: {
+            'X-Goog-FieldMask': 'id,displayName,formattedAddress,location,types,rating,userRatingCount,currentOpeningHours,websiteUri,internationalPhoneNumber,photos',
+          },
         },
-        timeout: this.timeout,
       })
 
-      if (response.data.status !== 'OK') {
+      if (!response) {
         return null
       }
 
-      return this.transformGooglePlace(response.data.result as any)
+      return this.transformGooglePlace(response as any)
     } catch (error) {
       this.log('error', `Failed to fetch place ${id}`, error)
       return null
@@ -115,7 +123,7 @@ export class GooglePlacesProvider extends BaseProvider {
   }
 
   /**
-   * Google Places Autocomplete
+   * Google Places Autocomplete (New API)
    * For fuzzy search / suggestions
    */
   async autocomplete(input: string, location?: { lat: number; lon: number }): Promise<any[]> {
@@ -124,27 +132,45 @@ export class GooglePlacesProvider extends BaseProvider {
     }
 
     try {
-      const response = await this.client.placeAutocomplete({
-        params: {
-          input,
-          location: location ? { lat: location.lat, lng: location.lon } : undefined,
-          radius: location ? 5000 : undefined,
-          key: env.GOOGLE_PLACES_API_KEY!,
-        },
-        timeout: this.timeout,
-      })
-
-      if (response.data.status !== 'OK' && response.data.status !== 'ZERO_RESULTS') {
-        throw new Error(`Google Autocomplete API error: ${response.data.status}`)
+      const request: any = {
+        input,
+        languageCode: 'en',
       }
 
-      return response.data.predictions.map((prediction) => ({
-        placeId: prediction.place_id,
-        description: prediction.description,
-        mainText: prediction.structured_formatting?.main_text,
-        secondaryText: prediction.structured_formatting?.secondary_text,
-        types: prediction.types,
-      }))
+      // Add location bias if provided
+      if (location) {
+        request.locationBias = {
+          circle: {
+            center: {
+              latitude: location.lat,
+              longitude: location.lon,
+            },
+            radius: 50000, // 50km radius (matching frontend)
+          },
+        }
+      }
+
+      const [response] = await this.client.autocompletePlaces(request)
+
+      if (!response || !response.suggestions) {
+        return []
+      }
+
+      // Filter for place predictions only (exclude query predictions)
+      const predictions = response.suggestions
+        .filter((s: any) => s.placePrediction)
+        .map((suggestion: any) => {
+          const placePrediction = suggestion.placePrediction
+          return {
+            placeId: placePrediction.placeId || placePrediction.place,
+            description: placePrediction.text?.text || '',
+            mainText: placePrediction.structuredFormat?.mainText?.text || '',
+            secondaryText: placePrediction.structuredFormat?.secondaryText?.text || '',
+            types: placePrediction.types || [],
+          }
+        })
+
+      return predictions
     } catch (error) {
       this.log('error', 'Google Autocomplete failed', error)
       throw error
@@ -152,17 +178,17 @@ export class GooglePlacesProvider extends BaseProvider {
   }
 
   /**
-   * Transform Google Place to our canonical Place format
+   * Transform Google Place (New API format) to our canonical Place format
    */
   private transformGooglePlace(googlePlace: any): Place {
-    const location = googlePlace.geometry?.location || {}
+    const location = googlePlace.location || {}
 
     return {
-      id: googlePlace.place_id || `google_${Date.now()}`,
-      name: googlePlace.name || 'Unknown',
+      id: googlePlace.id || googlePlace.name?.replace('places/', '') || `google_${Date.now()}`,
+      name: googlePlace.displayName?.text || googlePlace.name || 'Unknown',
       location: {
-        lat: typeof location.lat === 'function' ? location.lat() : location.lat || 0,
-        lon: typeof location.lng === 'function' ? location.lng() : location.lng || 0,
+        lat: location.latitude || 0,
+        lon: location.longitude || 0,
       },
       category: {
         primary: this.mapGoogleTypeToCategory(googlePlace.types?.[0]),
@@ -170,23 +196,24 @@ export class GooglePlacesProvider extends BaseProvider {
       },
       confidence: 0.9, // Google data is reliable
       socials: [],
-      websites: googlePlace.website ? [googlePlace.website] : [],
+      websites: googlePlace.websiteUri ? [googlePlace.websiteUri] : [],
       attributes: {
         rating: googlePlace.rating,
-        user_ratings_total: googlePlace.user_ratings_total,
-        price_level: googlePlace.price_level,
-        opening_hours: googlePlace.opening_hours,
-        address: googlePlace.vicinity || googlePlace.formatted_address,
-        phone: googlePlace.formatted_phone_number,
+        user_ratings_total: googlePlace.userRatingCount,
+        price_level: googlePlace.priceLevel,
+        opening_hours: googlePlace.currentOpeningHours,
+        address: googlePlace.formattedAddress,
+        phone: googlePlace.internationalPhoneNumber,
         photos: googlePlace.photos?.map((p: any) => ({
-          reference: p.photo_reference,
-          width: p.width,
-          height: p.height,
+          name: p.name,
+          widthPx: p.widthPx,
+          heightPx: p.heightPx,
+          authorAttributions: p.authorAttributions,
         })),
       },
       providers: {
         google: {
-          externalId: googlePlace.place_id,
+          externalId: googlePlace.id || googlePlace.name?.replace('places/', ''),
           raw: googlePlace,
         },
       },

@@ -1,12 +1,13 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { orchestrator } from '../services/orchestrator.js'
+import { cacheService } from '../services/cache.service.js'
 
 const places = new Hono()
 
 /**
  * GET /api/v1/places/autocomplete
- * Google Places Autocomplete
+ * Google Places Autocomplete with 30-day caching
  * Query params: input (required), lat, lon (optional)
  */
 places.get('/autocomplete', async (c) => {
@@ -27,12 +28,34 @@ places.get('/autocomplete', async (c) => {
           }
         : undefined
 
+    // Build cache params
+    const cacheParams = {
+      input,
+      ...(location && { lat: location.lat, lon: location.lon }),
+    }
+
+    // Check cache first
+    const cached = await cacheService.getAutocomplete(cacheParams)
+    if (cached) {
+      return c.json({
+        success: true,
+        input,
+        suggestions: cached,
+        metadata: { cached: true },
+      })
+    }
+
+    // Cache miss - fetch from Google
     const suggestions = await orchestrator.autocomplete(input, location)
+
+    // Cache for 30 days
+    await cacheService.setAutocomplete(cacheParams, suggestions)
 
     return c.json({
       success: true,
       input,
       suggestions,
+      metadata: { cached: false },
     })
   } catch (error) {
     console.error('[API] Autocomplete failed:', error)

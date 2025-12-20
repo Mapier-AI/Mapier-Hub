@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.74",
-    "@googlemaps/google-maps-services-js": "^3.4.2",
+    "@googlemaps/places": "^2.2.0",
     "@hono/node-server": "^1.19.6",
     "@openrouter/ai-sdk-provider": "^1.2.8",
     "@supabase/supabase-js": "^2.84.0",

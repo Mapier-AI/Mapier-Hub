@@ -78,13 +78,46 @@ export class CacheService {
 
   /**
    * Cache place details
+   * Default TTL: 30 days (2,592,000 seconds) for aggressive caching
    */
-  async setPlace(id: string, place: any, ttl: number = 1800): Promise<void> {
+  async setPlace(id: string, place: any, ttl: number = 2592000): Promise<void> {
     try {
       const key = `place:${id}`
       await redis.setex(key, ttl, JSON.stringify(place))
     } catch (error) {
       console.error('[Cache] Failed to set place:', error)
+    }
+  }
+
+  /**
+   * Get cached autocomplete results
+   */
+  async getAutocomplete(params: { input: string; lat?: number; lon?: number }): Promise<any[] | null> {
+    try {
+      const key = this.generateCacheKey('autocomplete', params)
+      const cached = await redis.get(key)
+
+      if (!cached) {
+        return null
+      }
+
+      return JSON.parse(cached)
+    } catch (error) {
+      console.error('[Cache] Failed to get autocomplete:', error)
+      return null
+    }
+  }
+
+  /**
+   * Cache autocomplete results
+   * Default TTL: 30 days (2,592,000 seconds) for aggressive caching
+   */
+  async setAutocomplete(params: { input: string; lat?: number; lon?: number }, suggestions: any[], ttl: number = 2592000): Promise<void> {
+    try {
+      const key = this.generateCacheKey('autocomplete', params)
+      await redis.setex(key, ttl, JSON.stringify(suggestions))
+    } catch (error) {
+      console.error('[Cache] Failed to set autocomplete:', error)
     }
   }
 

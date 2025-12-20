@@ -98,12 +98,11 @@ async function startServer() {
   ])
 
   if (!supabaseOk) {
-    console.error('❌ Supabase connection failed. Exiting.')
-    process.exit(1)
+    console.warn('⚠️  Supabase connection failed. Local database features disabled.')
   }
 
   if (!redisOk) {
-    console.error('⚠️  Redis connection failed. Caching disabled.')
+    console.warn('⚠️  Redis connection failed. Caching disabled.')
   }
 
   // Start server
