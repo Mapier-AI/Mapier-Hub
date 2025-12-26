@@ -409,7 +409,7 @@ export class PLIService {
       formatted?: string
     }
   } | null> {
-    const { data, error } = await supabase.rpc('find_nearby_place_new', {
+    const { data, error } = await supabase.rpc('find_nearby_place', {
       p_lat: lat,
       p_lon: lon,
       p_radius_meters: radiusMeters,
