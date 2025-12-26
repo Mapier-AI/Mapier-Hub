@@ -55,6 +55,16 @@ export interface ResolveResponse {
     // Both PLIs (for cross-platform)
     google_place_id?: string
     apple_place_id?: string
+
+    // Address fields
+    address?: {
+      street?: string
+      city?: string
+      state?: string
+      postcode?: string
+      country?: string
+      formatted?: string
+    }
   }
 
   // Resolution metadata
@@ -77,9 +87,50 @@ export interface BridgeResponse {
 
   // Resolution hint
   resolution_hint: 'cached' | 'search_required'
+
+  // Address fields
+  address?: {
+    street?: string
+    city?: string
+    state?: string
+    postcode?: string
+    country?: string
+    formatted?: string
+  }
 }
 
 export class PLIService {
+  /**
+   * Format address from individual components
+   * Handles both custom_places (with formatted) and places (without formatted)
+   */
+  private formatAddress(
+    street?: string | null,
+    city?: string | null,
+    state?: string | null,
+    postcode?: string | null,
+    country?: string | null,
+    formatted?: string | null
+  ): {
+    street?: string
+    city?: string
+    state?: string
+    postcode?: string
+    country?: string
+    formatted?: string
+  } {
+    const components = [street, city, state, postcode].filter((c) => c && c.trim())
+
+    return {
+      street: street || undefined,
+      city: city || undefined,
+      state: state || undefined,
+      postcode: postcode || undefined,
+      country: country || undefined,
+      formatted: formatted || (components.length > 0 ? components.join(', ') : undefined),
+    }
+  }
+
   /**
    * Resolve a place from any platform to canonical ID
    * This is the core conflation logic
@@ -104,7 +155,13 @@ export class PLIService {
 
     // 2. Handle match results
     if (match?.matched_source === 'places') {
-      // Found in Overture places
+      // Fetch full place details including address
+      const { data: placeData } = await supabase
+        .from('places')
+        .select('street, city, state, postcode, country')
+        .eq('id', match.matched_id)
+        .single()
+
       await this.cachePLI('places', match.matched_id, request)
 
       return {
@@ -118,6 +175,13 @@ export class PLIService {
           category: request.category,
           google_place_id: match.google_place_id || request.google_place_id,
           apple_place_id: match.apple_place_id || request.apple_place_id,
+          address: placeData ? this.formatAddress(
+            placeData.street,
+            placeData.city,
+            placeData.state,
+            placeData.postcode,
+            placeData.country
+          ) : undefined,
         },
         resolution: {
           method: match.match_confidence === 1.0 ? 'exact_pli' : 'spatial_match',
@@ -128,7 +192,13 @@ export class PLIService {
     }
 
     if (match?.matched_source === 'custom_places') {
-      // Found in custom places
+      // Fetch full place details including address
+      const { data: placeData } = await supabase
+        .from('custom_places')
+        .select('street, city, state, postcode, country, formatted_address')
+        .eq('id', match.matched_id)
+        .single()
+
       await this.cachePLI('custom_places', match.matched_id, request)
 
       return {
@@ -142,6 +212,14 @@ export class PLIService {
           category: request.category,
           google_place_id: match.google_place_id || request.google_place_id,
           apple_place_id: match.apple_place_id || request.apple_place_id,
+          address: placeData ? this.formatAddress(
+            placeData.street,
+            placeData.city,
+            placeData.state,
+            placeData.postcode,
+            placeData.country,
+            placeData.formatted_address
+          ) : undefined,
         },
         resolution: {
           method: match.match_confidence === 1.0 ? 'exact_pli' : 'spatial_match',
@@ -165,6 +243,7 @@ export class PLIService {
         category: request.category,
         google_place_id: request.google_place_id,
         apple_place_id: request.apple_place_id,
+        address: request.address,
       },
       resolution: {
         method: 'created_custom',
@@ -275,9 +354,11 @@ export class PLIService {
     const isCustom = placeId.startsWith('custom_')
     const table = isCustom ? 'custom_places' : 'places'
 
+    const columns = 'id, name, lat, lon, primary_category, google_place_id, apple_place_id, street, city, state, postcode, country'
+
     const { data, error } = await supabase
       .from(table)
-      .select('id, name, lat, lon, primary_category, google_place_id, apple_place_id')
+      .select(columns)
       .eq('id', placeId)
       .single()
 
@@ -286,6 +367,7 @@ export class PLIService {
     }
 
     const targetPli = targetPlatform === 'ios' ? data.apple_place_id : data.google_place_id
+    const formattedAddress = isCustom ? (data as any).formatted_address : undefined
 
     return {
       place_id: data.id,
@@ -295,6 +377,14 @@ export class PLIService {
       category: data.primary_category,
       target_pli: targetPli || undefined,
       resolution_hint: targetPli ? 'cached' : 'search_required',
+      address: this.formatAddress(
+        data.street,
+        data.city,
+        data.state,
+        data.postcode,
+        data.country,
+        formattedAddress
+      ),
     }
   }
 
@@ -310,8 +400,16 @@ export class PLIService {
     name: string
     distance_meters: number
     category?: string
+    address?: {
+      street?: string
+      city?: string
+      state?: string
+      postcode?: string
+      country?: string
+      formatted?: string
+    }
   } | null> {
-    const { data, error } = await supabase.rpc('find_nearby_place', {
+    const { data, error } = await supabase.rpc('find_nearby_place_new', {
       p_lat: lat,
       p_lon: lon,
       p_radius_meters: radiusMeters,
@@ -321,11 +419,20 @@ export class PLIService {
       return null
     }
 
+    const place = data[0]
+
     return {
-      place_id: data[0].place_id,
-      name: data[0].place_name,
-      distance_meters: data[0].distance_meters,
-      category: data[0].category,
+      place_id: place.place_id,
+      name: place.place_name,
+      distance_meters: place.distance_meters,
+      category: place.category,
+      address: this.formatAddress(
+        place.street,
+        place.city,
+        place.state,
+        place.postcode,
+        place.country
+      ),
     }
   }
 }
