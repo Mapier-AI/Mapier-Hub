@@ -17,11 +17,17 @@ export const supabase = createClient(
 )
 
 /**
- * Test Supabase connection
+ * Test Supabase connection with timeout
  */
 export async function testSupabaseConnection(): Promise<boolean> {
   try {
-    const { data, error } = await supabase.from('places').select('count').limit(1).single()
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Connection timeout after 5s')), 5000)
+    })
+
+    const queryPromise = supabase.from('places').select('id').limit(1)
+
+    const { error } = await Promise.race([queryPromise, timeoutPromise])
 
     if (error) throw error
 

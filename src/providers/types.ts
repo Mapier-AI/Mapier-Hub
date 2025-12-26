@@ -35,6 +35,14 @@ export interface Place {
   websites?: string[]
   attributes: Record<string, any> // Flexible attributes (rating, hours, etc.)
   distance?: number // Distance from search point in meters
+
+  // Platform-specific IDs for cross-platform sync
+  google_place_id?: string
+  apple_place_id?: string
+
+  // Source tracking
+  source_type?: 'provider' | 'custom' // 'provider' = Overture/data providers, 'custom' = user-submitted
+
   providers?: {
     [key: string]: {
       externalId: string
